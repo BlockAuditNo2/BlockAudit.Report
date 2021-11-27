@@ -1,290 +1,518 @@
-# GunHunterNFT
+# CACA
 
 This repository was created by Official BlockAudit Team.
 
-![Certificate_GUNHUNTER](https://user-images.githubusercontent.com/86651339/137327407-39fe18e8-5e90-4ef4-95d4-22541adde566.jpg)
+<a href="https://sm.ms/image/rXptNGQ1aubMKsS" target="_blank"><img src="https://i.loli.net/2021/11/27/rXptNGQ1aubMKsS.jpg" /></a>
 
 
 // SPDX-License-Identifier: MIT
 pragma solidity ^0.8.2;
 
-import "./Context.sol";
-import "./ERC20Burnable.sol";
-import "./Ownable.sol";
-import "./GunHunterInterface.sol";
-import "./SafeMath.sol";
-import "./ManagerInterface.sol";
-import "./IUniswapV2Router02.sol";
-import "./IUniswapV2Factory.sol";
+import "./CACA.sol";
 
-contract GunHunter is ERC20, ERC20Burnable, Ownable, GunHunterInterface {
+contract CACA is Context, IERC20, Ownable {
     using SafeMath for uint256;
+    using Address for address;
 
-    uint256 MAX_TOTAL_SUPPLY         = 1000000000 * 10 ** 9;
-    uint256 MAX_TOKENS_FOR_REWARDS   = 200000000  * 10 ** 9;
-    uint256 MAX_TOKENS_FOR_MARKETING = 30000000   * 10 ** 9;
-    uint256 MAX_TOKENS_FOR_AIRDROP   = 20000000   * 10 ** 9;
 
-    mapping(address => bool)    botAddresses;
-    mapping(address => uint256) private airdropWhitelist;
-    mapping(address => bool)    blackList;
+    struct RValuesStruct {
+        uint256 rAmount;
+        uint256 rTransferAmount;
+        uint256 rFee;
+        uint256 rBurn;
+        uint256 rCharity;
+        uint256 rLiquidity;
+    }
 
-    ManagerInterface public manager;
-    IUniswapV2Router02 public uniswapV2Router;
+    struct TValuesStruct {
+        uint256 tTransferAmount;
+        uint256 tFee;
+        uint256 tBurn;
+        uint256 tCharity;
+        uint256 tLiquidity;
+    }
 
-    address public uniswapV2Pair;
-    address public addressForMarketing;
-    
-    uint256 public tokensForMarketing = MAX_TOKENS_FOR_MARKETING;
-    uint256 public tokensForRewards   = MAX_TOKENS_FOR_REWARDS;
-    uint256 public tokensForAirdrop   = MAX_TOKENS_FOR_AIRDROP;
+    struct ValuesStruct {
+        uint256 rAmount;
+        uint256 rTransferAmount;
+        uint256 rFee;
+        uint256 rBurn;
+        uint256 rCharity;
+        uint256 rLiquidity;
+        uint256 tTransferAmount;
+        uint256 tFee;
+        uint256 tBurn;
+        uint256 tCharity;
+        uint256 tLiquidity;
+    }
 
-    // Anti bot-trade
-    bool public antiBotEnabled;
-    uint256 public antiBotDuration = 15 minutes;
-    uint256 public antiBotTime;
-    uint256 public antiBotAmount;
-    
-    // Transfer fee
-    uint256 public sellFeeRate = 6;
-    uint256 public buyFeeRate = 5;
-    
-    // address payable public marketingAddress = payable(0x7c5C50bBBa874B7E55DA5327C13E6613B47B2b8E); // Marketing Address
-    // address public immutable deadAddress = 0x000000000000000000000000000000000000dEaD;
-    // mapping (address => uint256) private _rOwned;
-    // mapping (address => uint256) private _tOwned;
-    // mapping (address => mapping (address => uint256)) private _allowances;
+    mapping (address => uint256) private _rOwned;
+    mapping (address => uint256) private _tOwned;
+    mapping (address => mapping (address => uint256)) private _allowances;
 
-    modifier onlySupporter () {
-        require(manager.onlySupporter(_msgSender()), "Caller is not supporter");
+    mapping (address => bool) private _isExcludedFromFee;
+
+    mapping (address => bool) private _isExcluded;
+    address[] private _excluded;
+
+    uint256 private constant MAX = ~uint256(0);
+    uint256 private _tTotal = 100000000 * 10**9;
+    uint256 private _rTotal = (MAX - (MAX % _tTotal));
+    uint256 private _tFeeTotal;
+    uint256 private _tBurnTotal;
+
+    string private _name = "CACA";
+    string private _symbol = "CACA";
+    uint8 private _decimals = 9;
+
+    uint256 public _taxFee = 0;
+    uint256 private _previousTaxFee = _taxFee;
+
+    uint256 public _burnFee = 0;
+    uint256 private _previousBurnFee = _burnFee;
+
+    uint256 public _charityFee = 0;
+    uint256 private _previousCharityFee = _charityFee;
+
+    uint256 public _liquidityFee = 0;
+    uint256 private _previousLiquidityFee = _liquidityFee;
+
+    address public charityWallet = 0x69cae5aB33F7d3e4d9c00F7A14AbdF2a20f784e1;
+
+    IUniswapV2Router02 public immutable uniswapV2Router;
+    address public immutable uniswapV2Pair;
+
+    bool inSwapAndLiquify;
+    bool public swapAndLiquifyEnabled = false;
+
+    uint256 public _maxTxAmount = 100000000 * 10**9;
+    uint256 private numTokensSellToAddToLiquidity = 500000 * 10**9;
+
+    event MinTokensBeforeSwapUpdated(uint256 minTokensBeforeSwap);
+    event SwapAndLiquifyEnabledUpdated(bool enabled);
+    event SwapAndLiquify(
+        uint256 tokensSwapped,
+        uint256 ethReceived,
+        uint256 tokensIntoLiqudity
+    );
+
+    modifier lockTheSwap {
+        inSwapAndLiquify = true;
         _;
+        inSwapAndLiquify = false;
     }
-    
-    constructor() ERC20("GunHunter", "GHT") {
-        addressForMarketing = _msgSender();
 
-        _mint(_msgSender(), MAX_TOTAL_SUPPLY.sub(tokensForAirdrop).sub(tokensForRewards));
-        _mint(address(this), tokensForAirdrop.add(tokensForRewards));
-        
+    constructor () public {
+        _rOwned[_msgSender()] = _rTotal;
+
         IUniswapV2Router02 _uniswapV2Router = IUniswapV2Router02(0x10ED43C718714eb63d5aA57B78B54704E256024E);
-        IUniswapV2Factory  _uniswapV2Factory = IUniswapV2Factory(_uniswapV2Router.factory());
-
-        uniswapV2Pair   = _uniswapV2Factory.createPair(address(this), _uniswapV2Router.WETH());
+        uniswapV2Pair = IUniswapV2Factory(_uniswapV2Router.factory())
+        .createPair(address(this), _uniswapV2Router.WETH());
         uniswapV2Router = _uniswapV2Router;
+        _isExcludedFromFee[owner()] = true;
+        _isExcludedFromFee[address(this)] = true;
 
-        _approve(address(this), address(uniswapV2Router), ~uint256(0));
-    }
-    
-    function decimals() public view virtual override returns (uint8) {
-        return 9;
-    }
-    
-    /**
-     * Set an address of the gameplay management contract.
-     */
-    function setManager(address _manager) public onlyOwner {
-        require(!blackList[_manager], "Address is blocked by owner");
-
-        manager = ManagerInterface(_manager);
+        emit Transfer(address(0), _msgSender(), _tTotal);
     }
 
-    function setMinTokensBeforeSwap(uint256 _tokensForMarketing) public onlyOwner {
-        require(_tokensForMarketing < MAX_TOKENS_FOR_MARKETING);
-        tokensForMarketing = _tokensForMarketing;
+    function name() public view returns (string memory) {
+        return _name;
     }
 
-    function setTokensForRewards(uint256 _tokensForRewards) public onlyOwner {
-        require(_tokensForRewards < MAX_TOKENS_FOR_REWARDS);
-        tokensForRewards = _tokensForRewards;
+    function symbol() public view returns (string memory) {
+        return _symbol;
     }
 
-    function setTokensForAirdrop(uint256 _tokensForAirdrop) public onlyOwner {
-        require(_tokensForAirdrop < MAX_TOKENS_FOR_REWARDS);
-        tokensForAirdrop = _tokensForAirdrop;
+    function decimals() public view returns (uint8) {
+        return _decimals;
     }
 
-    function addAirdropWhitelist(address[] memory to, uint256[] memory amount)
-        public
-        onlyOwner
-    {
-        require(to.length == amount.length, "Invalid arguments");
+    function totalSupply() public view override returns (uint256) {
+        return _tTotal;
+    }
 
-        for (uint256 index = 0; index < to.length; index++) {
-            if (blackList[address(to[index])]) {
-                revert("Address is blocked by owner");
-            }
-            airdropWhitelist[address(to[index])] = amount[index];
+    function balanceOf(address account) public view override returns (uint256) {
+        if (_isExcluded[account]) return _tOwned[account];
+        return tokenFromReflection(_rOwned[account]);
+    }
+
+    function transfer(address recipient, uint256 amount) public override returns (bool) {
+        _transfer(_msgSender(), recipient, amount);
+        return true;
+    }
+
+    function allowance(address owner, address spender) public view override returns (uint256) {
+        return _allowances[owner][spender];
+    }
+
+    function approve(address spender, uint256 amount) public override returns (bool) {
+        _approve(_msgSender(), spender, amount);
+        return true;
+    }
+
+    function transferFrom(address sender, address recipient, uint256 amount) public override returns (bool) {
+        _transfer(sender, recipient, amount);
+        _approve(sender, _msgSender(), _allowances[sender][_msgSender()].sub(amount, "ERC20: transfer amount exceeds allowance"));
+        return true;
+    }
+
+    function increaseAllowance(address spender, uint256 addedValue) public virtual returns (bool) {
+        _approve(_msgSender(), spender, _allowances[_msgSender()][spender].add(addedValue));
+        return true;
+    }
+
+    function decreaseAllowance(address spender, uint256 subtractedValue) public virtual returns (bool) {
+        _approve(_msgSender(), spender, _allowances[_msgSender()][spender].sub(subtractedValue, "ERC20: decreased allowance below zero"));
+        return true;
+    }
+
+    function isExcludedFromReward(address account) public view returns (bool) {
+        return _isExcluded[account];
+    }
+
+    function totalFees() public view returns (uint256) {
+        return _tFeeTotal;
+    }
+
+    function totalBurn() public view returns (uint256) {
+        return _tBurnTotal;
+    }
+
+    function deliver(uint256 tAmount) public {
+        address sender = _msgSender();
+        require(!_isExcluded[sender], "Excluded addresses cannot call this function");
+        uint256 rAmount = _getValues(tAmount).rAmount;
+        _rOwned[sender] = _rOwned[sender].sub(rAmount);
+        _rTotal = _rTotal.sub(rAmount);
+        _tFeeTotal = _tFeeTotal.add(tAmount);
+    }
+
+    function reflectionFromToken(uint256 tAmount, bool deductTransferFee) public view returns(uint256) {
+        require(tAmount <= _tTotal, "Amount must be less than supply");
+        if (!deductTransferFee) {
+            uint256 rAmount = _getValues(tAmount).rAmount;
+            return rAmount;
+        } else {
+            uint256 rTransferAmount = _getValues(tAmount).rTransferAmount;
+            return rTransferAmount;
         }
     }
 
-    /**
-     * Allows users to claim tokens from an airdrop.
-     */
-    function claimAirdrop () public {
-        require(airdropWhitelist[_msgSender()] > 0, "It's not possible to claim an airdrop at this address.");
-        require(tokensForAirdrop > 0, "The amount of tokens available for the airdrop has been exhausted.");
-        
-        _transfer(address(this), _msgSender(), airdropWhitelist[_msgSender()]);
-        tokensForAirdrop = tokensForAirdrop.sub(airdropWhitelist[_msgSender()]);
-        airdropWhitelist[_msgSender()] = 0;
+    function tokenFromReflection(uint256 rAmount) public view returns(uint256) {
+        require(rAmount <= _rTotal, "Amount must be less than total reflections");
+        uint256 currentRate =  _getRate();
+        return rAmount.div(currentRate);
     }
 
-    function setBotAddresses (address[] memory _addresses) external onlyOwner {
-        require(_addresses.length > 0);
+    function excludeFromReward(address account) public onlyOwner() {
+        require(account != 0x10ED43C718714eb63d5aA57B78B54704E256024E, 'We can not exclude Pancake router.');
+        require(!_isExcluded[account], "Account is already excluded");
+        require(_excluded.length < 50, "Excluded list is too long");
+        if(_rOwned[account] > 0) {
+            _tOwned[account] = tokenFromReflection(_rOwned[account]);
+        }
+        _isExcluded[account] = true;
+        _excluded.push(account);
+    }
 
-        for (uint256 index = 0; index < _addresses.length; index++) {
-            if (blackList[address(_addresses[index])]) {
-                revert("Address is blocked by owner");
+    function includeInReward(address account) external onlyOwner() {
+        require(_isExcluded[account], "Account is already excluded");
+        for (uint256 i = 0; i < _excluded.length; i++) {
+            if (_excluded[i] == account) {
+                _excluded[i] = _excluded[_excluded.length - 1];
+                _tOwned[account] = 0;
+                _isExcluded[account] = false;
+                _excluded.pop();
+                break;
             }
-            botAddresses[address(_addresses[index])] = true;
+        }
+    }
+    
+    receive() external payable {}
+
+    function _distributeFee(uint256 rFee, uint256 rBurn, uint256 rCharity, uint256 tFee, uint256 tBurn, uint256 tCharity) private {
+        _rTotal = _rTotal.sub(rFee).sub(rBurn);
+        _tFeeTotal = _tFeeTotal.add(tFee);
+        _tTotal = _tTotal.sub(tBurn);
+        _tBurnTotal = _tBurnTotal.add(tBurn);
+
+        _rOwned[charityWallet] = _rOwned[charityWallet].add(rCharity);
+        if (_isExcluded[charityWallet]) {
+            _tOwned[charityWallet] = _tOwned[charityWallet].add(tCharity);
         }
     }
 
-    function addBotAddress (address _address) external onlyOwner {
-        require(!botAddresses[_address]);
-        require(!blackList[_address], "Address is blocked by owner");
+    function _getValues(uint256 tAmount) private view returns (ValuesStruct memory) {
+        TValuesStruct memory tvs = _getTValues(tAmount);
+        RValuesStruct memory rvs = _getRValues(tAmount, tvs.tFee, tvs.tBurn, tvs.tCharity, tvs.tLiquidity, _getRate());
 
-        botAddresses[_address] = true;
+        return ValuesStruct(
+            rvs.rAmount,
+            rvs.rTransferAmount,
+            rvs.rFee,
+            rvs.rBurn,
+            rvs.rCharity,
+            rvs.rLiquidity,
+            tvs.tTransferAmount,
+            tvs.tFee,
+            tvs.tBurn,
+            tvs.tCharity,
+            tvs.tLiquidity
+        );
     }
 
-    /**
-     * To prevent bot trading, limit the number of tokens that can be transferred.
-     */
-    function antiBot(uint256 amount) external onlyOwner {
-        require(amount > 0, "not accept 0 value");
-        require(!antiBotEnabled);
-
-        antiBotAmount = amount;
-        antiBotTime = block.timestamp + antiBotDuration;
-        antiBotEnabled = true;
+    function _getTValues(uint256 tAmount) private view returns (TValuesStruct memory) {
+        uint256 tFee = calculateTaxFee(tAmount);
+        uint256 tBurn = calculateBurnFee(tAmount);
+        uint256 tCharity = calculateCharityFee(tAmount);
+        uint256 tLiquidity = calculateLiquidityFee(tAmount);
+        uint256 tTransferAmount = tAmount.sub(tFee).sub(tBurn).sub(tCharity).sub(tLiquidity);
+        return TValuesStruct(tTransferAmount, tFee, tBurn, tCharity, tLiquidity);
     }
-    
-    function sweepTokenForMarketing(uint256 amount) public onlyOwner {
+
+    function _getRValues(uint256 tAmount, uint256 tFee, uint256 tBurn, uint256 tCharity, uint256 tLiquidity, uint256 currentRate) private pure returns (RValuesStruct memory) {
+        uint256 rAmount = tAmount.mul(currentRate);
+        uint256 rFee = tFee.mul(currentRate);
+        uint256 rBurn = tBurn.mul(currentRate);
+        uint256 rCharity = tCharity.mul(currentRate);
+        uint256 rLiquidity = tLiquidity.mul(currentRate);
+        uint256 rTransferAmount = rAmount.sub(rFee).sub(rLiquidity).sub(rBurn).sub(rCharity);
+        return RValuesStruct(rAmount, rTransferAmount, rFee, rBurn, rCharity, rLiquidity);
+    }
+
+    function _getRate() private view returns(uint256) {
+        (uint256 rSupply, uint256 tSupply) = _getCurrentSupply();
+        return rSupply.div(tSupply);
+    }
+
+    function _getCurrentSupply() private view returns(uint256, uint256) {
+        uint256 rSupply = _rTotal;
+        uint256 tSupply = _tTotal;
+        for (uint256 i = 0; i < _excluded.length; i++) {
+            if (_rOwned[_excluded[i]] > rSupply || _tOwned[_excluded[i]] > tSupply) return (_rTotal, _tTotal);
+            rSupply = rSupply.sub(_rOwned[_excluded[i]]);
+            tSupply = tSupply.sub(_tOwned[_excluded[i]]);
+        }
+        if (rSupply < _rTotal.div(_tTotal)) return (_rTotal, _tTotal);
+        return (rSupply, tSupply);
+    }
+
+    function _takeLiquidity(uint256 rLiquidity, uint256 tLiquidity) private {
+        _rOwned[address(this)] = _rOwned[address(this)].add(rLiquidity);
+        if(_isExcluded[address(this)])
+            _tOwned[address(this)] = _tOwned[address(this)].add(tLiquidity);
+    }
+
+    function calculateTaxFee(uint256 _amount) private view returns (uint256) {
+        return _amount.mul(_taxFee).div(
+            10**2
+        );
+    }
+
+    function calculateBurnFee(uint256 _amount) private view returns (uint256) {
+        return _amount.mul(_burnFee).div(
+            10**2
+        );
+    }
+
+    function calculateCharityFee(uint256 _amount) private view returns (uint256) {
+        return _amount.mul(_charityFee).div(
+            10**2
+        );
+    }
+
+    function calculateLiquidityFee(uint256 _amount) private view returns (uint256) {
+        return _amount.mul(_liquidityFee).div(
+            10**2
+        );
+    }
+
+    function removeAllFee() private {
+        _taxFee       = 0;
+        _liquidityFee = 0;
+        _burnFee      = 0;
+        _charityFee = 0;
+    }
+
+    function restoreAllFee() private {
+        _taxFee       = 0;
+        _liquidityFee = 2;
+        _charityFee = 2;
+        _burnFee      = 2;
+
+    }
+
+    function isExcludedFromFee(address account) public view returns(bool) {
+        return _isExcludedFromFee[account];
+    }
+
+    function _approve(address owner, address spender, uint256 amount) private {
+        require(owner != address(0), "ERC20: approve from the zero address");
+        require(spender != address(0), "ERC20: approve to the zero address");
+
+        _allowances[owner][spender] = amount;
+        emit Approval(owner, spender, amount);
+    }
+
+    function _transfer(
+        address from,
+        address to,
+        uint256 amount
+    ) private {
+        require(from != address(0), "ERC20: transfer from the zero address");
+        require(to != address(0), "ERC20: transfer to the zero address");
+        require(amount > 0, "Transfer amount must be greater than zero");
+
         uint256 contractTokenBalance = balanceOf(address(this));
-        if (tokensForMarketing >= amount && contractTokenBalance > amount) {
-            swapTokensForEth(amount);
+        bool overMinTokenBalance = contractTokenBalance >= numTokensSellToAddToLiquidity;
+        if (
+            overMinTokenBalance &&
+            !inSwapAndLiquify &&
+            from != uniswapV2Pair &&
+            swapAndLiquifyEnabled
+        ) {
+            contractTokenBalance = numTokensSellToAddToLiquidity;
+            swapAndLiquify(contractTokenBalance);
         }
-    }
-    
-    function swapTokensForEth(uint256 tokenAmount) private {
-        require(addressForMarketing != address(0), "Invalid marketing address");
 
-        // generate the uniswap pair path of token -> weth
+        _tokenTransfer(from,to,amount);
+    }
+
+    function swapAndLiquify(uint256 contractTokenBalance) private lockTheSwap {
+        uint256 half = contractTokenBalance.div(2);
+        uint256 otherHalf = contractTokenBalance.sub(half);
+        uint256 initialBalance = address(this).balance;
+        swapTokensForEth(half);
+        uint256 newBalance = address(this).balance.sub(initialBalance);
+        addLiquidity(otherHalf, newBalance);
+
+        emit SwapAndLiquify(half, newBalance, otherHalf);
+    }
+
+    function swapTokensForEth(uint256 tokenAmount) private {
         address[] memory path = new address[](2);
         path[0] = address(this);
         path[1] = uniswapV2Router.WETH();
 
-        // make the swap
+        _approve(address(this), address(uniswapV2Router), tokenAmount);
         uniswapV2Router.swapExactTokensForETHSupportingFeeOnTransferTokens(
             tokenAmount,
-            0, // accept any amount of ETH
+            0,
             path,
-            addressForMarketing, // The contract
+            address(this),
             block.timestamp
         );
-
-        tokensForMarketing = tokensForMarketing.sub(tokenAmount);
     }
-    
-    /**
-     * After the user has won the game, send them a reward.
-     */
-    function rewards(address recipient, uint256 amount) override external onlySupporter {
-        require(recipient != address(0), "0x is not accepted here");
-        require(tokensForRewards > 0, "Rewards not available");
-        require(amount > 0, "not accept 0 value");
-        require(!blackList[recipient], "Address is blocked by owner");
 
-        if (tokensForRewards >= amount) {
-            _mint(recipient, amount);
-            tokensForRewards = tokensForRewards.sub(amount);
-        } else {
-            _mint(recipient, tokensForRewards);
-            tokensForRewards = 0;
+    function addLiquidity(uint256 tokenAmount, uint256 ethAmount) private {
+        _approve(address(this), address(uniswapV2Router), tokenAmount);
+        uniswapV2Router.addLiquidityETH{value: ethAmount}(
+            address(this),
+            tokenAmount,
+            0,
+            0,
+            owner(),
+            block.timestamp
+        );
+    }
+
+    function _tokenTransfer(address sender, address recipient, uint256 amount) private {
+        if(_isExcludedFromFee[sender] || _isExcludedFromFee[recipient]){
+            removeAllFee();
         }
-    }
-
-    function setAddressForMarketing(address _address) external onlyOwner {
-        require(_address != address(0), "0x is not accepted here");
-        require(!blackList[_address], "Address is blocked by owner");
-
-        addressForMarketing = _address;
-    }
-
-    /**
-     * Add a bot prevention feature by overriding the _transfer function.
-     */
-    function _transfer(
-        address sender,
-        address recipient,
-        uint256 amount
-    ) internal virtual override {
-        require(!blackList[sender], "Sender address is blocked by owner");
-        require(!blackList[recipient], "recipient address is blocked by owner");
-        if (
-            antiBotTime > block.timestamp &&
-            amount > antiBotAmount &&
-            botAddresses[sender]
-        ) {
-            revert("Anti Bot");
+        else{
+            require(amount <= _maxTxAmount, "Transfer amount exceeds the maxTxAmount.");
         }
 
-       
+        ValuesStruct memory vs = _getValues(amount);
+        _takeLiquidity(vs.rLiquidity, vs.tLiquidity);
+        _distributeFee(vs.rFee, vs.rBurn, vs.rCharity, vs.tFee, vs.tBurn, vs.tCharity);
 
-        uint256 transferFeeRate = recipient == uniswapV2Pair
-            ? sellFeeRate
-            : (sender == uniswapV2Pair ? buyFeeRate : 0);
-
-        if (
-            transferFeeRate > 0 &&
-            sender != address(this) &&
-            recipient != address(this)
-        ) {
-            uint256 _fee = amount.mul(transferFeeRate).div(100);
-            super._transfer(sender, addressForMarketing, _fee);
-            amount = amount.sub(_fee);
+        if (_isExcluded[sender] && !_isExcluded[recipient]) {
+            _transferFromExcluded(sender, recipient, amount, vs);
+        } else if (!_isExcluded[sender] && _isExcluded[recipient]) {
+            _transferToExcluded(sender, recipient, vs);
+        } else if (!_isExcluded[sender] && !_isExcluded[recipient]) {
+            _transferStandard(sender, recipient, vs);
+        } else if (_isExcluded[sender] && _isExcluded[recipient]) {
+            _transferBothExcluded(sender, recipient, amount, vs);
         }
 
-        super._transfer(sender, recipient, amount);
+        if(_isExcludedFromFee[sender] || _isExcludedFromFee[recipient])
+            restoreAllFee();
     }
 
-
-     /**
-     * Allow address
-     */
-    function allowAddress (address _address) external onlyOwner {
-        blackList[_address] = false;
+    function _transferStandard(address sender, address recipient, ValuesStruct memory vs) private {
+        _rOwned[sender] = _rOwned[sender].sub(vs.rAmount);
+        _rOwned[recipient] = _rOwned[recipient].add(vs.rTransferAmount);
+        emit Transfer(sender, recipient, vs.tTransferAmount);
     }
 
-     /**
-     * Block address
-     */
-    function blockAddress (address _address) external onlyOwner {
-        blackList[_address] = true;
+    function _transferToExcluded(address sender, address recipient, ValuesStruct memory vs) private {
+        _rOwned[sender] = _rOwned[sender].sub(vs.rAmount);
+        _tOwned[recipient] = _tOwned[recipient].add(vs.tTransferAmount);
+        _rOwned[recipient] = _rOwned[recipient].add(vs.rTransferAmount);
+        emit Transfer(sender, recipient, vs.tTransferAmount);
     }
 
-    /**
-     * Set buy fee rate
-     */
-    function setBuyFeeRate (uint256 fee) external onlyOwner {
-        buyFeeRate = fee;
+    function _transferFromExcluded(address sender, address recipient, uint256 tAmount, ValuesStruct memory vs) private {
+        _tOwned[sender] = _tOwned[sender].sub(tAmount);
+        _rOwned[sender] = _rOwned[sender].sub(vs.rAmount);
+        _rOwned[recipient] = _rOwned[recipient].add(vs.rTransferAmount);
+        emit Transfer(sender, recipient, vs.tTransferAmount);
     }
 
-    /**
-     * Set sell fee rate
-     */
-    function setSellFeeRate (uint256 fee) external onlyOwner {
-        sellFeeRate = fee;
+    function _transferBothExcluded(address sender, address recipient, uint256 tAmount, ValuesStruct memory vs) private {
+        _tOwned[sender] = _tOwned[sender].sub(tAmount);
+        _rOwned[sender] = _rOwned[sender].sub(vs.rAmount);
+        _tOwned[recipient] = _tOwned[recipient].add(vs.tTransferAmount);
+        _rOwned[recipient] = _rOwned[recipient].add(vs.rTransferAmount);
+        emit Transfer(sender, recipient, vs.tTransferAmount);
     }
 
-     /**
-     * Set antibot time
-     */
-    function setAntiBotDuration (uint256 time) external onlyOwner {
-        antiBotDuration = time;
+    function excludeFromFee(address account) public onlyOwner {
+        _isExcludedFromFee[account] = true;
     }
-    
-    
-    // receive eth from uniswap swap
-    receive() external payable {}
-}
+
+    function includeInFee(address account) public onlyOwner {
+        _isExcludedFromFee[account] = false;
+    }
+
+    function enableAllFees() external onlyOwner() {
+        _taxFee       = 0;
+        _previousTaxFee = _taxFee;
+        _burnFee      = 2;
+        _previousBurnFee = _taxFee;
+        _charityFee = 2;
+        _previousCharityFee = _charityFee;
+        _liquidityFee = 2;
+        _previousLiquidityFee = _liquidityFee;
+        setSwapAndLiquifyEnabled(true);
+    }
+
+    function ExcludeAllFees() external onlyOwner() {
+        _taxFee       = 0;
+        _previousTaxFee = _taxFee;
+        _burnFee      = 0;
+        _previousBurnFee = _taxFee;
+        _charityFee = 0;
+        _previousCharityFee = _charityFee;
+        _liquidityFee = 0;
+        _previousLiquidityFee = _liquidityFee;
+        setSwapAndLiquifyEnabled(false);
+    }
+
+    function setNewCharityWallet(address newWallet) external onlyOwner() {
+        charityWallet = newWallet;
+    }
+
+    function setMaxTxPercent(uint256 maxTxPercent) external onlyOwner() {
+        _maxTxAmount = _tTotal.mul(maxTxPercent).div(
+            10**2
+        );
+    }
+
+    function setSwapAndLiquifyEnabled(bool _enabled) public onlyOwner {
+        swapAndLiquifyEnabled = _enabled;
+        emit SwapAndLiquifyEnabledUpdated(_enabled);
+    }
